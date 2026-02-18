@@ -1,0 +1,21 @@
+# Virtual environments
+venv/
+venv_face/
+env/
+.env
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Database
+*.db
+*.sqlite3
+
+# ONNX models (too large)
+*.onnx
+
+# OS files
+.DS_Store
+Thumbs.db
