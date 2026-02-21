@@ -3,30 +3,33 @@ import numpy as np
 import base64
 from pathlib import Path
 
-# ── Model paths ──────────────────────────────────────────────────────────────
-# Place your .onnx files inside: face_recognition/app/models/face/
 MODEL_DIR        = Path(__file__).parent.parent / "models" / "face"
 DETECTOR_MODEL   = str(MODEL_DIR / "face_detection_yunet_2023mar.onnx")
 RECOGNIZER_MODEL = str(MODEL_DIR / "face_recognition_sface_2021dec.onnx")
 
-# ── Thresholds (from OpenCV SFace paper) ─────────────────────────────────────
-COSINE_THRESHOLD = 0.35   # >= match
-L2_THRESHOLD     = 1.1  # <= match
+COSINE_THRESHOLD = 0.3
+L2_THRESHOLD     = 1.1
 
 
 def _decode_image(image_b64: str) -> np.ndarray:
-    """Base64 string → OpenCV BGR image."""
     if "," in image_b64:
         image_b64 = image_b64.split(",", 1)[1]
-    buf = np.frombuffer(base64.b64decode(image_b64), np.uint8)
+
+    decoded = base64.b64decode(image_b64)
+    if len(decoded) == 0:
+        raise ValueError("Image data is empty after base64 decode.")
+
+    buf = np.frombuffer(decoded, np.uint8)
+    if buf.size == 0:
+        raise ValueError("Image buffer is empty.")
+
     img = cv2.imdecode(buf, cv2.IMREAD_COLOR)
     if img is None:
-        raise ValueError("Cannot decode image. Send a valid JPEG or PNG in base64.")
+        raise ValueError("Cannot decode image. Send a valid JPEG or PNG.")
     return img
 
 
-def _detect_faces(img: np.ndarray) -> np.ndarray | None:
-    """Run YuNet face detector and return all face boxes."""
+def _detect_faces(img: np.ndarray):
     h, w = img.shape[:2]
     detector = cv2.FaceDetectorYN.create(
         DETECTOR_MODEL, "", (w, h),
@@ -42,50 +45,39 @@ def _get_recognizer():
     return cv2.FaceRecognizerSF.create(RECOGNIZER_MODEL, "")
 
 
-def extract_embedding(image_b64: str) -> list[float]:
-    """
-    Detect the largest face in the image and return its 128-d SFace embedding.
-    Raises ValueError if no face is found.
-    """
+def extract_embedding(image_b64: str) -> list:
     img   = _decode_image(image_b64)
     faces = _detect_faces(img)
 
     if faces is None or len(faces) == 0:
         raise ValueError("No face detected. Make sure your face is clearly visible.")
 
-    # Pick largest face by area
-    largest = faces[np.argmax(faces[:, 2] * faces[:, 3])]
-
+    largest    = faces[np.argmax(faces[:, 2] * faces[:, 3])]
     recognizer = _get_recognizer()
     aligned    = recognizer.alignCrop(img, largest)
     embedding  = recognizer.feature(aligned).flatten().tolist()
     return embedding
 
 
-def average_embeddings(embeddings: list[list[float]]) -> list[float]:
-    """Average N embeddings and L2-normalize the result."""
+def average_embeddings(embeddings: list) -> list:
     arr  = np.array(embeddings, dtype=np.float32)
     avg  = arr.mean(axis=0)
     norm = np.linalg.norm(avg)
     return (avg / norm if norm > 0 else avg).tolist()
 
 
-def match_in_group(group_image_b64: str, stored_embedding: list[float]) -> dict:
-    """
-    Find every face in a group photo and compare each against stored_embedding.
-    Returns the best match result.
-    """
+def match_in_group(group_image_b64: str, stored_embedding: list) -> dict:
     img   = _decode_image(group_image_b64)
     faces = _detect_faces(img)
 
     if faces is None or len(faces) == 0:
         return {
-            "matched": False,
-            "reason": "No faces detected in the group photo.",
-            "cosine_score": None,
-            "l2_score": None,
+            "matched":          False,
+            "reason":           "No faces detected in the group photo.",
+            "cosine_score":     None,
+            "l2_score":         None,
             "matched_face_box": None,
-            "total_faces": 0,
+            "total_faces":      0,
         }
 
     recognizer  = _get_recognizer()
@@ -107,7 +99,7 @@ def match_in_group(group_image_b64: str, stored_embedding: list[float]) -> dict:
         except Exception:
             continue
 
-    matched = best_cosine >= COSINE_THRESHOLD and best_l2 <= L2_THRESHOLD
+    matched = (best_cosine >= COSINE_THRESHOLD) and (best_l2 <= L2_THRESHOLD)
 
     return {
         "matched":          matched,

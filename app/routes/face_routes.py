@@ -27,19 +27,14 @@ def draw_box(image_bytes: bytes, face_box: list, matched: bool) -> bytes:
         color = (0, 255, 0)
         label = "STUDENT"
 
-        # Draw rectangle
         cv2.rectangle(img, (x, y), (x + w, y + h), color, 2)
 
-        # Draw label background
         (text_w, text_h), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
         cv2.rectangle(img, (x, y - text_h - 10), (x + text_w, y), color, -1)
-
-        # Draw label text
         cv2.putText(img, label, (x, y - 5),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
 
     elif not matched:
-        # No box drawn, just red text on top left
         cv2.putText(img, "STUDENT NOT FOUND", (10, 30),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
 
@@ -61,6 +56,9 @@ async def register(
     for img_file in images:
         try:
             contents = await img_file.read()
+            if not contents:
+                failed += 1
+                continue
             emb = face_service.extract_embedding(file_to_b64(contents))
             embeddings.append(emb)
         except ValueError:
@@ -109,9 +107,11 @@ async def verify(
         )
 
     contents = await group_photo.read()
+    if not contents:
+        raise HTTPException(status_code=400, detail="Uploaded file is empty.")
+
     result = face_service.match_in_group(file_to_b64(contents), record.get_embedding())
 
-    # Draw box only if matched, nothing if not matched
     annotated_image = draw_box(
         contents,
         result.get("matched_face_box") if result["matched"] else None,
